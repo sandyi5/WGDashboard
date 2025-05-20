@@ -1185,13 +1185,23 @@ class WireguardConfiguration:
         return True, availableAddress
 
     def __format_ip_with_subnet(self, ip, ip_version):
-    """Format IP addresses with appropriate subnet mask: /32 for IPv4, /64 for IPv6"""
-    if ip_version == 4:
-        # IPv4 addresses use /32 subnet mask
-        return f"{ip}/32"
-    else:
-        # IPv6 addresses use /64 subnet mask
-        return f"{ip}/64"
+        if ip_version == 4:
+            # IPv4 addresses use /32 subnet mask
+            return f"{ip}/32"
+        else:
+            # IPv6 addresses use /64 subnet mask
+            # IPv6 주소에서 서브넷을 올바르게 형식화하고 마지막 부분이 1로 끝나도록 변경
+            ip_parts = str(ip).split(':')
+
+            # 주소 포맷에 따라 처리
+            if '::' in str(ip):
+                # :: 표기법이 있는 경우 (압축된 형식)
+                return f"{str(ip)}1/64"
+            else:
+                # 일반 IPv6 형식
+                # 마지막 세그먼트를 1로 설정
+                ip_parts[-1] = '1'
+                return f"{':'.join(ip_parts)}/64"
     
     def getRealtimeTrafficUsage(self):
         stats = psutil.net_io_counters(pernic=True, nowrap=True)
@@ -2077,6 +2087,7 @@ def auth_req():
                 })
                 response.content_type = "application/json"
                 response.status_code = 401
+                response.set_cookie("authToken", "")
                 return response
 
 @app.route(f'{APP_PREFIX}/api/handshake', methods=["GET", "OPTIONS"])
