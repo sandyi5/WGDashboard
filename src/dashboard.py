@@ -1190,18 +1190,18 @@ class WireguardConfiguration:
             return f"{ip}/32"
         else:
             # IPv6 addresses use /64 subnet mask
-            # IPv6 주소에서 서브넷을 올바르게 형식화하고 마지막 부분이 1로 끝나도록 변경
-            ip_parts = str(ip).split(':')
-
-            # 주소 포맷에 따라 처리
-            if '::' in str(ip):
-                # :: 표기법이 있는 경우 (압축된 형식)
-                return f"{str(ip)}1/64"
-            else:
-                # 일반 IPv6 형식
-                # 마지막 세그먼트를 1로 설정
-                ip_parts[-1] = '1'
-                return f"{':'.join(ip_parts)}/64"
+            try:
+                # ipaddress 모듈을 사용하여 IP를 객체로 변환
+                ip_obj = ipaddress.IPv6Address(ip)
+                
+                # 네트워크 접두사 생성 (앞 64비트만 유지)
+                network_prefix = ipaddress.IPv6Network(f"{ip}/64", strict=False).network_address
+                
+                # 표준 형식으로 반환
+                return f"{network_prefix}::1/64"
+            except Exception as e:
+                print(f"IPv6 주소 처리 중 오류: {e}")
+                return f"{ip}/64"
     
     def getRealtimeTrafficUsage(self):
         stats = psutil.net_io_counters(pernic=True, nowrap=True)
