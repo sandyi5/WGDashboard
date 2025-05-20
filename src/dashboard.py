@@ -1174,16 +1174,25 @@ class WireguardConfiguration:
                     existedAddress.add(ipaddress.ip_network(caSplit[0]).compressed)
                     if threshold == -1:
                         availableAddress[ca] = filter(lambda ip : ip not in existedAddress,
-                                map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts()))
+                                map(lambda iph : self.__format_ip_with_subnet(iph, network.version), network.hosts()))
                     else:
                         availableAddress[ca] = list(islice(filter(lambda ip : ip not in existedAddress,
-                                map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts())), threshold))
+                                map(lambda iph : self.__format_ip_with_subnet(iph, network.version), network.hosts())), threshold))
             except Exception as e:
                 print(e)
                 print(f"[WGDashboard] Error: Failed to parse IP address {ca} from {self.Name}")
         print("Generated IP")
         return True, availableAddress
 
+    def __format_ip_with_subnet(self, ip, ip_version):
+    """Format IP addresses with appropriate subnet mask: /32 for IPv4, /64 for IPv6"""
+    if ip_version == 4:
+        # IPv4 addresses use /32 subnet mask
+        return f"{ip}/32"
+    else:
+        # IPv6 addresses use /64 subnet mask
+        return f"{ip}/64"
+    
     def getRealtimeTrafficUsage(self):
         stats = psutil.net_io_counters(pernic=True, nowrap=True)
         if self.Name in stats.keys():
@@ -1652,7 +1661,7 @@ class AmneziaWGPeer(Peer):
         finalFilename = ""
         for i in filename:
             if re.match("^[a-zA-Z0-9_=+.-]$", i):
-                finalFilename += i
+                               finalFilename += i
 
         peerConfiguration = f'''[Interface]
 PrivateKey = {self.private_key}
@@ -2573,8 +2582,8 @@ def API_addPeers(configName):
             dns_addresses: str = data.get('DNS', DashboardConfig.GetConfig("Peers", "peer_global_DNS")[1])
             mtu: int = data.get('mtu', int(DashboardConfig.GetConfig("Peers", "peer_MTU")[1]))
             keep_alive: int = data.get('keepalive', int(DashboardConfig.GetConfig("Peers", "peer_keep_alive")[1]))
-            preshared_key: str = data.get('preshared_key', "")            
-    
+            preshared_key: str = data.get('preshared_key', "")
+
             if type(mtu) is not int or mtu < 0 or mtu > 1460:
                 mtu = int(DashboardConfig.GetConfig("Peers", "peer_MTU")[1])
             if type(keep_alive) is not int or keep_alive < 0:
@@ -2884,8 +2893,7 @@ def API_ping_execute():
             return ResponseObject(False, "Please specify an IP Address (v4/v6)")
         except Exception as exp:
             return ResponseObject(False, exp)
-    return ResponseObject(False, "Please provide ipAddress and count")
-
+    return ResponseObject(False, "Please provide ipAddress")
 
 @app.get(f'{APP_PREFIX}/api/traceroute/execute')
 def API_traceroute_execute():
