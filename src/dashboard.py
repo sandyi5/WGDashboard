@@ -1149,8 +1149,10 @@ class WireguardConfiguration:
                         subnet = ipaddress.IPv6Network((subnet_int, subnet_prefixlen), strict=False)
                         host_ip = ipaddress.IPv6Address(int(subnet.network_address) + 1)
                         host_ip_str = f"{host_ip.compressed}/64"
+                        # 반드시 /64 CIDR로 key를 반환
+                        subnet_key = subnet.with_prefixlen  # 예: 2a14:7580:ff54:1::/64
                         if host_ip.compressed not in existedAddress:
-                            availableAddress[str(subnet)] = [host_ip_str]
+                            availableAddress[str(subnet_key)] = [host_ip_str]
                             count += 1
                         if threshold > 0 and count >= threshold:
                             break
