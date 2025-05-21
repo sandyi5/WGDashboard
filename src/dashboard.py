@@ -1137,73 +1137,33 @@ class WireguardConfiguration:
             ca = ca.strip()
             caSplit = ca.split('/')
             try:
-                if len(caSplit) == 2:
+                # IPv6 /48 대역이면 /64 서브넷 개수 계산해서 반복
+                if len(caSplit) == 2 and ':' in caSplit[0] and caSplit[1] == '48':
+                    network = ipaddress.IPv6Network(ca, strict=False)
+                    base_int = int(network.network_address)
+                    subnet_prefixlen = 64
+                    subnet_count = 2 ** (subnet_prefixlen - network.prefixlen)  # 2^(64-48) = 65536
+                    count = 0
+                    for i in range(subnet_count):
+                        subnet_int = base_int + (i << 16)
+                        subnet = ipaddress.IPv6Network((subnet_int, subnet_prefixlen))
+                        host_ip = ipaddress.IPv6Address(int(subnet.network_address) + 1)
+                        host_ip_str = f"{host_ip.compressed}/64"
+                        if host_ip.compressed not in existedAddress:
+                            availableAddress[str(subnet)] = [host_ip_str]
+                            count += 1
+                        if threshold > 0 and count >= threshold:
+                            break
+                # 기존 방식 (IPv4, /64 이하)
+                elif len(caSplit) == 2:
                     network = ipaddress.ip_network(ca, False)
-                    existedAddress.add(ipaddress.ip_network(caSplit[0]))
-                    availableAddress[ca] = network.num_addresses
-                    for p in existedAddress:
-                        if p.version == network.version and p.subnet_of(network):
-                            availableAddress[ca] -= 1                    
-            except Exception as e:
-                print(e)
-                print(f"[WGDashboard] Error: Failed to parse IP address {ca} from {self.Name}")
-        return True, availableAddress
-    
-    def getAvailableIP(self, threshold = 255):
-        if len(self.Address) < 0:
-            return False, None
-        existedAddress = set()
-        availableAddress = {}
-        for p in self.Peers + self.getRestrictedPeersList():
-            peerAllowedIP = p.allowed_ip.split(',')
-            for pip in peerAllowedIP:
-                ppip = pip.strip().split('/')
-                if len(ppip) == 2:
-                    try:
-                        check = ipaddress.ip_network(ppip[0])
-                        existedAddress.add(check.compressed)
-                    except Exception as e:
-                        print(f"[WGDashboard] Error: {self.Name} peer {p.id} have invalid ip")
-        configurationAddresses = self.Address.split(',')
-        for ca in configurationAddresses:
-            ca = ca.strip()
-            caSplit = ca.split('/')
-            try:
-                if len(caSplit) == 2:
-                    network = ipaddress.ip_network(ca, False)
-                    if network.version == 6 and network.prefixlen <= 48:
-                        # IPv6 /48 대역에서 /64 서브넷 생성
-                        subnets = list(network.subnets(new_prefix=64))
-                        availableSubnets = []
-                        for subnet in subnets:
-                            if subnet.compressed not in existedAddress:
-                                availableSubnets.append(subnet)
-
-                        if threshold == -1:
-                            availableAddress[ca] = [
-                                f"{subnet.network_address + 1}" for subnet in availableSubnets
-                            ]
-                        else:
-                            availableAddress[ca] = [
-                                f"{subnet.network_address + 1}" for subnet in availableSubnets[:threshold]
-                            ]
+                    existedAddress.add(ipaddress.ip_network(caSplit[0]).compressed)
+                    if threshold == -1:
+                        availableAddress[ca] = filter(lambda ip : ip not in existedAddress,
+                                map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts()))
                     else:
-                        existedAddress.add(ipaddress.ip_network(caSplit[0]).compressed)
-                        if threshold == -1:
-                            availableAddress[ca] = filter(
-                                lambda ip: ip not in existedAddress,
-                                map(lambda iph: ipaddress.ip_network(iph).compressed, network.hosts()),
-                            )
-                        else:
-                            availableAddress[ca] = list(
-                                islice(
-                                    filter(
-                                        lambda ip: ip not in existedAddress,
-                                        map(lambda iph: ipaddress.ip_network(iph).compressed, network.hosts()),
-                                    ),
-                                    threshold,
-                                )
-                            )
+                        availableAddress[ca] = list(islice(filter(lambda ip : ip not in existedAddress,
+                                map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts())), threshold))
             except Exception as e:
                 print(e)
                 print(f"[WGDashboard] Error: Failed to parse IP address {ca} from {self.Name}")
@@ -2910,8 +2870,7 @@ def API_ping_execute():
             return ResponseObject(False, "Please specify an IP Address (v4/v6)")
         except Exception as exp:
             return ResponseObject(False, exp)
-    return ResponseObject(False, "Please provide ipAddress and count")
-
+    return ResponseObject(False, "Please provide ipAddress")
 
 @app.get(f'{APP_PREFIX}/api/traceroute/execute')
 def API_traceroute_execute():
