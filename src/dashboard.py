@@ -1117,7 +1117,7 @@ class WireguardConfiguration:
             return False, str(e)
         return True, None
     
-    def getAvailableIP(self, threshold=255):
+    def getNumberOfAvailableIP(self):
         if len(self.Address) < 0:
             return False, None
         existedAddress = set()
@@ -1137,50 +1137,64 @@ class WireguardConfiguration:
             ca = ca.strip()
             caSplit = ca.split('/')
             try:
-                # IPv6 /48 대역이면 /64 서브넷 개수 계산해서 반복
-                if len(caSplit) == 2 and ':' in caSplit[0] and caSplit[1] == '48':
-                    network = ipaddress.IPv6Network(ca, strict=False)
-                    base_int = int(network.network_address)
-                    subnet_prefixlen = 64
-                    subnet_count = 2 ** (subnet_prefixlen - network.prefixlen)
-                    count = 0
-                    for i in range(subnet_count):
-                        subnet_int = base_int + (i << 16)
-                        subnet = ipaddress.IPv6Network((subnet_int, subnet_prefixlen), strict=False)
-                        host_ip = ipaddress.IPv6Address(int(subnet.network_address) + 1)
-                        host_ip_str = f"{host_ip.compressed}/64"
-                        # 반드시 /64 CIDR로 key를 반환
-                        subnet_key = subnet.with_prefixlen  # 예: 2a14:7580:ff54:1::/64
-                        if host_ip.compressed not in existedAddress:
-                            availableAddress[str(subnet_key)] = [host_ip_str]
-                            count += 1
-                        if threshold > 0 and count >= threshold:
-                            break
-                # 기존 방식 (IPv4, /64 이하)
-                elif len(caSplit) == 2:
+                if len(caSplit) == 2:
                     network = ipaddress.ip_network(ca, False)
-                    existedAddress.add(ipaddress.ip_network(caSplit[0]).compressed)
+                    existedAddress.add(ipaddress.ip_network(caSplit[0]))
+                    availableAddress[ca] = network.num_addresses
+                    for p in existedAddress:
+                        if p.version == network.version and p.subnet_of(network):
+                            availableAddress[ca] -= 1                    
+            except Exception as e:
+                print(e)
+                print(f"[WGDashboard] Error: Failed to parse IP address {ca} from {self.Name}")
+        return True, availableAddress
+    
+    def getAvailableIP(self, threshold = 255):
+        if len(self.Address) < 0:
+            return False, None
+        existedAddress = set()
+        availableAddress = {}
+        for p in self.Peers + self.getRestrictedPeersList():
+            peerAllowedIP = p.allowed_ip.split(',')
+            for pip in peerAllowedIP:
+                ppip = pip.strip().split('/')
+                if len(ppip) == 2:
+                    try:
+                        ip_net = ipaddress.ip_network(ppip[0], strict=False)
+                        # 기존에 할당된 /64 서브넷 집합에 추가
+                        subnet64 = ip_net.supernet(new_prefix=64)
+                        existedAddress.add(subnet64.network_address.compressed)
+                    except Exception as e:
+                        print(f"[WGDashboard] Error: {self.Name} peer {p.id} have invalid ip")
+        configurationAddresses = self.Address.split(',')
+        for ca in configurationAddresses:
+            ca = ca.strip()
+            caSplit = ca.split('/')
+            try:
+                if len(caSplit) == 2:
+                    network = ipaddress.ip_network(ca, False)
+                    # 인터페이스 네트워크의 /64 상위 네트워크도 제외 대상에 추가
+                    supernet64 = network.supernet(new_prefix=64)
+                    existedAddress.add(supernet64.network_address.compressed)
+                    # /64 서브넷 생성
                     if threshold == -1:
-                        availableAddress[ca] = filter(lambda ip : ip not in existedAddress,
-                                map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts()))
+                        subnets = network.subnets(new_prefix=64)
                     else:
-                        availableAddress[ca] = list(islice(filter(lambda ip : ip not in existedAddress,
-                                map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts())), threshold))
+                        subnets = islice(network.subnets(new_prefix=64), threshold)
+                    available_subnets = []
+                    for subnet in subnets:
+                        sid = subnet.network_address.compressed
+                        if sid not in existedAddress:
+                            # 호스트 주소 ::1 할당
+                            host_ip = ipaddress.ip_address(subnet.network_address) + 1
+                            available_subnets.append(f"{host_ip}/64")
+                    availableAddress[ca] = available_subnets
             except Exception as e:
                 print(e)
                 print(f"[WGDashboard] Error: Failed to parse IP address {ca} from {self.Name}")
         print("Generated IP")
         return True, availableAddress
 
-    def getNumberOfAvailableIP(self, threshold=255):
-        status, availableAddress = self.getAvailableIP(threshold)
-        if not status:
-            return False, {}
-        result = {}
-        for subnet, ips in availableAddress.items():
-            result[subnet] = len(ips)
-        return True, result
-    
     def getRealtimeTrafficUsage(self):
         stats = psutil.net_io_counters(pernic=True, nowrap=True)
         if self.Name in stats.keys():
