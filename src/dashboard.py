@@ -1146,12 +1146,11 @@ class WireguardConfiguration:
                     count = 0
                     for i in range(subnet_count):
                         subnet_int = base_int + (i << 16)
-                        subnet = ipaddress.IPv6Network((subnet_int, subnet_prefixlen))
+                        subnet = ipaddress.IPv6Network((subnet_int, subnet_prefixlen), strict=False)
                         host_ip = ipaddress.IPv6Address(int(subnet.network_address) + 1)
                         host_ip_str = f"{host_ip.compressed}/64"
-                        # 여기서 CIDR을 붙여 반환
                         if host_ip.compressed not in existedAddress:
-                            availableAddress[str(subnet) + '/64'] = [host_ip_str]
+                            availableAddress[str(subnet)] = [host_ip_str]
                             count += 1
                         if threshold > 0 and count >= threshold:
                             break
@@ -1171,6 +1170,15 @@ class WireguardConfiguration:
         print("Generated IP")
         return True, availableAddress
 
+    def getNumberOfAvailableIP(self, threshold=255):
+        status, availableAddress = self.getAvailableIP(threshold)
+        if not status:
+            return False, {}
+        result = {}
+        for subnet, ips in availableAddress.items():
+            result[subnet] = len(ips)
+        return True, result
+    
     def getRealtimeTrafficUsage(self):
         stats = psutil.net_io_counters(pernic=True, nowrap=True)
         if self.Name in stats.keys():
