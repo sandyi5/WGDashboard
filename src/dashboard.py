@@ -1117,7 +1117,7 @@ class WireguardConfiguration:
             return False, str(e)
         return True, None
     
-    def getNumberOfAvailableIP(self):
+    def getAvailableIP(self, threshold=255):
         if len(self.Address) < 0:
             return False, None
         existedAddress = set()
@@ -1142,7 +1142,7 @@ class WireguardConfiguration:
                     network = ipaddress.IPv6Network(ca, strict=False)
                     base_int = int(network.network_address)
                     subnet_prefixlen = 64
-                    subnet_count = 2 ** (subnet_prefixlen - network.prefixlen)  # 2^(64-48) = 65536
+                    subnet_count = 2 ** (subnet_prefixlen - network.prefixlen)
                     count = 0
                     for i in range(subnet_count):
                         subnet_int = base_int + (i << 16)
