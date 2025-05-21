@@ -1160,10 +1160,8 @@ class WireguardConfiguration:
                 ppip = pip.strip().split('/')
                 if len(ppip) == 2:
                     try:
-                        ip_net = ipaddress.ip_network(ppip[0], strict=False)
-                        # 기존에 할당된 /64 서브넷 집합에 추가
-                        subnet64 = ip_net.supernet(new_prefix=64)
-                        existedAddress.add(subnet64.network_address.compressed)
+                        check = ipaddress.ip_network(ppip[0])
+                        existedAddress.add(check.compressed)
                     except Exception as e:
                         print(f"[WGDashboard] Error: {self.Name} peer {p.id} have invalid ip")
         configurationAddresses = self.Address.split(',')
@@ -1173,22 +1171,55 @@ class WireguardConfiguration:
             try:
                 if len(caSplit) == 2:
                     network = ipaddress.ip_network(ca, False)
-                    # 인터페이스 네트워크의 /64 상위 네트워크도 제외 대상에 추가
-                    supernet64 = network.supernet(new_prefix=64)
-                    existedAddress.add(supernet64.network_address.compressed)
-                    # /64 서브넷 생성
-                    if threshold == -1:
-                        subnets = network.subnets(new_prefix=64)
+                    existedAddress.add(ipaddress.ip_network(caSplit[0]).compressed)
+                    
+                    # IPv6 주소인 경우 특별 처리
+                    if ':' in caSplit[0]:  # IPv6 주소 감지
+                        if threshold == -1:
+                            # IPv6 /64 서브넷 할당 로직
+                            ipv6_prefixes = []
+                            # 기존 네트워크의 프리픽스 길이 확인
+                            original_prefix_len = network.prefixlen
+                            if original_prefix_len < 64:
+                                # 프리픽스가 /64보다 작은 경우(예: /48) /64 서브넷으로 분할
+                                subnets = list(network.subnets(new_prefix=64))
+                                for subnet in subnets:
+                                    if any(ipaddress.ip_network(ip).subnet_of(subnet) for ip in existedAddress):
+                                        continue
+                                    # 각 /64 서브넷에 대해 ::1 호스트 주소 생성
+                                    ipv6_address = f"{subnet.network_address}1"  # ::1 설정
+                                    ipv6_cidr = f"{ipv6_address}/64"
+                                    if ipv6_cidr not in existedAddress:
+                                        ipv6_prefixes.append(ipv6_cidr)
+                                    if len(ipv6_prefixes) >= threshold and threshold > 0:
+                                        break
+                            availableAddress[ca] = ipv6_prefixes
+                        else:
+                            # 제한된 수의 IPv6 /64 서브넷 생성
+                            ipv6_prefixes = []
+                            original_prefix_len = network.prefixlen
+                            if original_prefix_len < 64:
+                                subnets = list(network.subnets(new_prefix=64))
+                                count = 0
+                                for subnet in subnets:
+                                    if any(ipaddress.ip_network(ip).subnet_of(subnet) for ip in existedAddress):
+                                        continue
+                                    ipv6_address = f"{subnet.network_address}1"  # ::1 설정
+                                    ipv6_cidr = f"{ipv6_address}/64"
+                                    if ipv6_cidr not in existedAddress:
+                                        ipv6_prefixes.append(ipv6_cidr)
+                                        count += 1
+                                    if count >= threshold:
+                                        break
+                            availableAddress[ca] = ipv6_prefixes
                     else:
-                        subnets = islice(network.subnets(new_prefix=64), threshold)
-                    available_subnets = []
-                    for subnet in subnets:
-                        sid = subnet.network_address.compressed
-                        if sid not in existedAddress:
-                            # 호스트 주소 ::1 할당
-                            host_ip = ipaddress.ip_address(subnet.network_address) + 1
-                            available_subnets.append(f"{host_ip}/64")
-                    availableAddress[ca] = available_subnets
+                        # IPv4 주소는 기존 로직 유지
+                        if threshold == -1:
+                            availableAddress[ca] = filter(lambda ip : ip not in existedAddress,
+                                    map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts()))
+                        else:
+                            availableAddress[ca] = list(islice(filter(lambda ip : ip not in existedAddress,
+                                    map(lambda iph : ipaddress.ip_network(iph).compressed, network.hosts())), threshold))
             except Exception as e:
                 print(e)
                 print(f"[WGDashboard] Error: Failed to parse IP address {ca} from {self.Name}")
